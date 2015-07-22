@@ -53,25 +53,19 @@ def main():
         print USAGE_MESSAGE
         sys.exit(1)
     http = httplib2.Http()
-    # Replace the first marker with the metadata endpoint substring
-    # required to query the external IP address of the current instance
-    ip_endpoint = 'TODO01'
+    ip_endpoint = '/instance/network-interfaces/0/access-configs/0/external-ip'
     ip_address = metaquery(http,
                            METADATA_SERVER +
                            ip_endpoint)
     token_data = metaquery(http,
                            METADATA_SERVER +
                            '/instance/service-accounts/default/token')
-    # Replace the second marker with the metadata endpoint substring
-    # required to query the project ID
     project_id = metaquery(http,
                            METADATA_SERVER +
-                           'TODO02')
-    # Replace the second marker with the metadata endpoint substring
-    # required to query the value for the custom key 'sql-name'
+                           '/project/project-id')
     sql_name = metaquery(http,
                          METADATA_SERVER +
-                         'TODO03')
+                         '/instance/attributes/sql-name')
     if token_data and sql_name and ip_address:
         j = json.loads(token_data)
         credentials = oauth2_client.AccessTokenCredentials(j['access_token'],
@@ -101,9 +95,9 @@ def main():
                          ['ipConfiguration']
                          ['authorizedNetworks']
                          .remove(response_address))
-            # Replace the fourth marker with the patch method for 
-            # a Cloud SQL instance
-            p_response = TODO04
+            p_response = cloudsql.instances().patch(project=project_id,
+                                                    instance=sql_name,
+                                                    body=response).execute()
             print json.dumps(p_response,
                              sort_keys=True,
                              indent=4,
