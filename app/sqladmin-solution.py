@@ -16,10 +16,13 @@
 #
 import sys
 import json
+import time
+import random
 
 import httplib2
 import googleapiclient.discovery as api_discovery
 from oauth2client import client as oauth2_client
+from googleapiclient import errors
 
 METADATA_SERVER = 'http://metadata/computeMetadata/v1'
 USAGE_MESSAGE = 'usage: python sqladmin.py start OR stop'
@@ -73,37 +76,50 @@ def main():
         cloudsql = api_discovery.build('sqladmin',
                                        'v1beta4',
                                        http=credentials.authorize(http))
-        response = cloudsql.instances().get(project=project_id,
-                                            instance=sql_name,
-                                            fields='settings').execute()
-        address = address_resource(ip_address)
-        if response and 'settings' in response:
-            if sys.argv[1] == 'start':
-                (response
-                 ['settings']
-                 ['ipConfiguration']
-                 ['authorizedNetworks']
-                 .append(address))
-            else:
-                for response_address in (response
-                                         ['settings']
-                                         ['ipConfiguration']
-                                         ['authorizedNetworks']):
-                    if response_address['value'] == ip_address:
+        for retry in range(0, 5):
+            try:
+                response = cloudsql.instances().get(project=project_id,
+                                                    instance=sql_name,
+                                                    fields='settings').execute()
+                address = address_resource(ip_address)
+                if response and 'settings' in response:
+                    if sys.argv[1] == 'start':
                         (response
                          ['settings']
                          ['ipConfiguration']
                          ['authorizedNetworks']
-                         .remove(response_address))
-            p_response = cloudsql.instances().patch(project=project_id,
-                                                    instance=sql_name,
-                                                    body=response).execute()
-            print json.dumps(p_response,
-                             sort_keys=True,
-                             indent=4,
-                             separators=(',', ': '))
-        else:
-            print 'Unexpected response from the Cloud SQL API'
+                         .append(address))
+                    else:
+                        for response_address in (response
+                                                 ['settings']
+                                                 ['ipConfiguration']
+                                                 ['authorizedNetworks']):
+                            if response_address['value'] == ip_address:
+                                (response
+                                 ['settings']
+                                 ['ipConfiguration']
+                                 ['authorizedNetworks']
+                                 .remove(response_address))
+                    p_response = cloudsql.instances().patch(project=project_id,
+                                                            instance=sql_name,
+                                                            body=response).execute()
+                    print json.dumps(p_response,
+                                     sort_keys=True,
+                                     indent=4,
+                                     separators=(',', ': '))
+                    break
+                else:
+                    print 'Unexpected response from the Cloud SQL API'
+            except errors.HttpError, e:
+                error = json.loads(e.content)
+                print error
+                if error.get('error').get('code') == 403:
+                    # exponential backoff retry
+                    time.sleep((2 ** retry) + random.randint(0, 60))
+                    print "retrying..."
+                    print (time.strftime("%H:%M:%S"))
+                else:
+                    raise
     else:
         print "There was an error contacting the metadata server."
 if __name__ == '__main__':
