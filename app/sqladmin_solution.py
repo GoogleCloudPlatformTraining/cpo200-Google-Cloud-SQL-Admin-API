@@ -18,6 +18,7 @@ import sys
 import json
 import time
 import random
+import logging
 
 import httplib2
 import googleapiclient.discovery as api_discovery
@@ -48,6 +49,52 @@ def address_resource(ip_address):
     return address
 
 
+def server_authorization(command, cloudsql, ip_address, project_id, sql_name):
+    for retry in range(0, 5):
+        try:
+            response = cloudsql.instances().get(project=project_id,
+                                                instance=sql_name,
+                                                fields='settings').execute()
+            if response and 'settings' in response:
+                if command == 'start':
+                    (response
+                     ['settings']
+                     ['ipConfiguration']
+                     ['authorizedNetworks']
+                     .append(address_resource(ip_address)))
+                else:
+                    (response
+                     ['settings']
+                     ['ipConfiguration']
+                     ['authorizedNetworks']
+                     .remove(address_resource(ip_address)))
+                p_response = cloudsql.instances().patch(project=project_id,
+                                                        instance=sql_name,
+                                                        body=response).execute()
+                return(json.dumps(p_response,
+                                  sort_keys=True,
+                                  indent=4,
+                                  separators=(',', ': ')))
+            else:
+                logging.debug('Unexpected response from the Cloud SQL API')
+        except errors.HttpError as error_data:
+            error = json.loads(error_data.content)
+            if error.get('error').get('code') == 403:
+                if retry == 4:
+                    logging.debug("Could not complete the patch.")
+                    return None
+                else:
+                    # exponential backoff retry
+                    logging.debug("sleeping...")
+                    time.sleep((2 ** retry) + random.randint(0, 60))
+                    logging.debug("retrying...")
+            else:
+                raise
+        except ValueError:
+            logging.debug("Attempted to remove an unauthorized IP address.")
+            return None
+
+
 def main():
     if len(sys.argv) != 2:
         print USAGE_MESSAGE
@@ -55,6 +102,7 @@ def main():
     if not (sys.argv[1] == 'start' or sys.argv[1] == 'stop'):
         print USAGE_MESSAGE
         sys.exit(1)
+    logging.basicConfig(level=logging.DEBUG)
     http = httplib2.Http()
     ip_endpoint = '/instance/network-interfaces/0/access-configs/0/external-ip'
     ip_address = metaquery(http,
@@ -76,50 +124,13 @@ def main():
         cloudsql = api_discovery.build('sqladmin',
                                        'v1beta4',
                                        http=credentials.authorize(http))
-        for retry in range(0, 5):
-            try:
-                response = cloudsql.instances().get(project=project_id,
-                                                    instance=sql_name,
-                                                    fields='settings').execute()
-                address = address_resource(ip_address)
-                if response and 'settings' in response:
-                    if sys.argv[1] == 'start':
-                        (response
-                         ['settings']
-                         ['ipConfiguration']
-                         ['authorizedNetworks']
-                         .append(address))
-                    else:
-                        for response_address in (response
-                                                 ['settings']
-                                                 ['ipConfiguration']
-                                                 ['authorizedNetworks']):
-                            if response_address['value'] == ip_address:
-                                (response
-                                 ['settings']
-                                 ['ipConfiguration']
-                                 ['authorizedNetworks']
-                                 .remove(response_address))
-                    p_response = cloudsql.instances().patch(project=project_id,
-                                                            instance=sql_name,
-                                                            body=response).execute()
-                    print json.dumps(p_response,
-                                     sort_keys=True,
-                                     indent=4,
-                                     separators=(',', ': '))
-                    break
-                else:
-                    print 'Unexpected response from the Cloud SQL API'
-            except errors.HttpError, e:
-                error = json.loads(e.content)
-                print error
-                if error.get('error').get('code') == 403:
-                    # exponential backoff retry
-                    time.sleep((2 ** retry) + random.randint(0, 60))
-                    print "retrying..."
-                else:
-                    raise
+        logging.debug(server_authorization(command=sys.argv[1],
+                                           cloudsql=cloudsql,
+                                           ip_address=ip_address,
+                                           project_id=project_id,
+                                           sql_name=sql_name))
     else:
-        print "There was an error contacting the metadata server."
+        logging.debug('There was an error contacting the metadata server.')
+
 if __name__ == '__main__':
     main()
