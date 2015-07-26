@@ -117,7 +117,6 @@ def main():
                     # exponential backoff retry
                     time.sleep((2 ** retry) + random.randint(0, 60))
                     print "retrying..."
-                    print (time.strftime("%H:%M:%S"))
                 else:
                     raise
     else:
