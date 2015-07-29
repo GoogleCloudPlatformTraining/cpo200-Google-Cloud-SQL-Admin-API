@@ -27,6 +27,7 @@ from googleapiclient import errors
 
 METADATA_SERVER = 'http://metadata/computeMetadata/v1'
 USAGE_MESSAGE = 'usage: python sqladmin.py start OR stop'
+RETRY = 5
 
 
 def metaquery(http, endpoint):
@@ -50,35 +51,47 @@ def address_resource(ip_address):
 
 
 def server_authorization(command, cloudsql, ip_address, project_id, sql_name):
-    for retry in range(0, 5):
+    for retry in range(0, RETRY):
         try:
             response = cloudsql.instances().get(project=project_id,
                                                 instance=sql_name,
                                                 fields='settings').execute()
-            if response and 'settings' in response:
-                if command == 'start':
-                    (response
-                     ['settings']
-                     ['ipConfiguration']
-                     ['authorizedNetworks']
-                     .append(address_resource(ip_address)))
-                else:
-                    (response
-                     ['settings']
-                     ['ipConfiguration']
-                     ['authorizedNetworks']
-                     .remove(address_resource(ip_address)))
-                p_response = TODO04
+            if command == 'start':
+                (response
+                 ['settings']
+                 ['ipConfiguration']
+                 ['authorizedNetworks']
+                 .append(address_resource(ip_address)))
+            else:
+                (response
+                 ['settings']
+                 ['ipConfiguration']
+                 ['authorizedNetworks']
+                 .remove(address_resource(ip_address)))
+            logging.debug(json.dumps(response,
+                                     sort_keys=True,
+                                     indent=4,
+                                     separators=(',', ': ')))
+            # Replace the fourth marker with the API call required to patch
+            # a Cloud SQL instance
+            p_response = TODO04
+            time.sleep(random.randint(1, 6))
+            verify = cloudsql.instances().get(project=project_id,
+                                              instance=sql_name,
+                                              fields='settings').execute()
+            networks = verify['settings']['ipConfiguration']['authorizedNetworks']
+            net_count = networks.count(address_resource(ip_address))
+            if (command == 'start' and net_count == 1) or (command == 'stop' and net_count == 0):
                 return(json.dumps(p_response,
                                   sort_keys=True,
                                   indent=4,
                                   separators=(',', ': ')))
             else:
-                logging.debug('Unexpected response from the Cloud SQL API')
+                return None
         except errors.HttpError as error_data:
             error = json.loads(error_data.content)
-            if error.get('error').get('code') == 403:
-                if retry == 4:
+            if error.get('error').get('code') in (403, 500):
+                if retry == (RETRY - 1):
                     logging.debug("Could not complete the patch.")
                     return None
                 else:
@@ -102,6 +115,8 @@ def main():
         sys.exit(1)
     logging.basicConfig(level=logging.DEBUG)
     http = httplib2.Http()
+    # Replace the first marker with the metadata endpoint substring
+    # required to query the value of the external IP address
     ip_endpoint = 'TODO01'
     ip_address = metaquery(http,
                            METADATA_SERVER +
@@ -126,11 +141,12 @@ def main():
         cloudsql = api_discovery.build('sqladmin',
                                        'v1beta4',
                                        http=credentials.authorize(http))
-        logging.debug(server_authorization(command=sys.argv[1],
-                                           cloudsql=cloudsql,
-                                           ip_address=ip_address,
-                                           project_id=project_id,
-                                           sql_name=sql_name))
+        patch_response = server_authorization(command=sys.argv[1],
+                                              cloudsql=cloudsql,
+                                              ip_address=ip_address,
+                                              project_id=project_id,
+                                              sql_name=sql_name)
+        logging.debug(patch_response)
     else:
         logging.debug('There was an error contacting the metadata server.')
 
