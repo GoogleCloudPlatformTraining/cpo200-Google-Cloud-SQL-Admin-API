@@ -28,15 +28,27 @@ METADATA_SERVER = 'http://metadata/computeMetadata/v1'
 RETRY = 5
 
 
-def metaquery(http, endpoint):
-    resp, content = http.request(endpoint,
-                                 method='GET',
-                                 body=None,
-                                 headers={'Metadata-Flavor': 'Google'})
-    if resp.status == 200:
-        return content
-    else:
-        return None
+def metaquery(endpoint):
+    for retry in range(0, RETRY):
+        try:
+            http = httplib2.Http()
+            resp, content = http.request(endpoint,
+                                         method='GET',
+                                         body=None,
+                                         headers={'Metadata-Flavor': 'Google'})
+            if resp.status == 200:
+                return content
+            else:
+                return None
+        except httplib.ResponseNotReady:
+           if retry == (RETRY - 1):
+               logging.debug("Could not retrieve metadata")
+               return None
+           else:
+               # exponential backoff retry
+               logging.debug("sleeping...")
+               time.sleep((2 ** retry) + random.randint(0, 5))
+               logging.debug("retrying metadata retrieval...")
 
 
 def address_resource(ip_address):
@@ -85,34 +97,30 @@ def server_authorization(cloudsql, ip_address, project_id, sql_name):
                     # exponential backoff retry
                     logging.debug("sleeping...")
                     time.sleep((2 ** retry) + random.randint(0, 60))
-                    logging.debug("retrying...")
+                    logging.debug("retrying API request...")
             else:
                 raise
 
 
 def main():
     logging.basicConfig(level=logging.DEBUG)
-    http = httplib2.Http()
     # Replace the first marker with the metadata endpoint substring
     # required to query the value of the external IP address
     ip_endpoint = 'TODO01'
-    ip_address = metaquery(http,
-                           METADATA_SERVER +
+    ip_address = metaquery(METADATA_SERVER +
                            ip_endpoint)
-    token_data = metaquery(http,
-                           METADATA_SERVER +
+    token_data = metaquery(METADATA_SERVER +
                            '/instance/service-accounts/default/token')
     # Replace the second marker with the metadata endpoint substring
     # required to query the project ID
-    project_id = metaquery(http,
-                           METADATA_SERVER +
+    project_id = metaquery(METADATA_SERVER +
                            'TODO02')
     # Replace the second marker with the metadata endpoint substring
     # required to query the value for the custom key 'sql-name'
-    sql_name = metaquery(http,
-                         METADATA_SERVER +
+    sql_name = metaquery(METADATA_SERVER +
                          'TODO03')
     if token_data and sql_name and ip_address:
+        http = httplib2.Http()
         j = json.loads(token_data)
         credentials = oauth2_client.AccessTokenCredentials(j['access_token'],
                                                            'my-user-agent/1.0')
