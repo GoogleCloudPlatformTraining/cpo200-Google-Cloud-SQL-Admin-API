@@ -14,7 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-import sys
 import json
 import time
 import random
@@ -26,7 +25,6 @@ from oauth2client import client as oauth2_client
 from googleapiclient import errors
 
 METADATA_SERVER = 'http://metadata/computeMetadata/v1'
-USAGE_MESSAGE = 'usage: python sqladmin.py start OR stop'
 RETRY = 5
 
 
@@ -50,24 +48,14 @@ def address_resource(ip_address):
     return address
 
 
-def server_authorization(command, cloudsql, ip_address, project_id, sql_name):
+def server_authorization(cloudsql, ip_address, project_id, sql_name):
     for retry in range(0, RETRY):
         try:
             response = cloudsql.instances().get(project=project_id,
                                                 instance=sql_name,
                                                 fields='settings').execute()
-            if command == 'start':
-                (response
-                 ['settings']
-                 ['ipConfiguration']
-                 ['authorizedNetworks']
-                 .append(address_resource(ip_address)))
-            else:
-                (response
-                 ['settings']
-                 ['ipConfiguration']
-                 ['authorizedNetworks']
-                 .remove(address_resource(ip_address)))
+            (response['settings']['ipConfiguration']['authorizedNetworks']
+             .append(address_resource(ip_address)))
             logging.debug(json.dumps(response,
                                      sort_keys=True,
                                      indent=4,
@@ -80,8 +68,7 @@ def server_authorization(command, cloudsql, ip_address, project_id, sql_name):
                                               instance=sql_name,
                                               fields='settings').execute()
             networks = verify['settings']['ipConfiguration']['authorizedNetworks']
-            net_count = networks.count(address_resource(ip_address))
-            if (command == 'start' and net_count == 1) or (command == 'stop' and net_count == 0):
+            if networks.count(address_resource(ip_address)) == 1:
                 return(json.dumps(p_response,
                                   sort_keys=True,
                                   indent=4,
@@ -101,18 +88,9 @@ def server_authorization(command, cloudsql, ip_address, project_id, sql_name):
                     logging.debug("retrying...")
             else:
                 raise
-        except ValueError:
-            logging.debug("Attempted to remove an unauthorized IP address.")
-            return None
 
 
 def main():
-    if len(sys.argv) != 2:
-        print USAGE_MESSAGE
-        sys.exit(1)
-    if not (sys.argv[1] == 'start' or sys.argv[1] == 'stop'):
-        print USAGE_MESSAGE
-        sys.exit(1)
     logging.basicConfig(level=logging.DEBUG)
     http = httplib2.Http()
     # Replace the first marker with the metadata endpoint substring
@@ -141,12 +119,14 @@ def main():
         cloudsql = api_discovery.build('sqladmin',
                                        'v1beta4',
                                        http=credentials.authorize(http))
-        patch_response = server_authorization(command=sys.argv[1],
-                                              cloudsql=cloudsql,
+        patch_response = server_authorization(cloudsql=cloudsql,
                                               ip_address=ip_address,
                                               project_id=project_id,
                                               sql_name=sql_name)
-        logging.debug(patch_response)
+        if patch_response:
+            logging.debug(patch_response)
+        else:
+            logging.debug("Giving up, could not complete the patch authorization.")
     else:
         logging.debug('There was an error contacting the metadata server.')
 
