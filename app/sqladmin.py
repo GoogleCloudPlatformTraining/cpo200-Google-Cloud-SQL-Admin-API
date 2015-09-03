@@ -72,9 +72,9 @@ def server_authorization(cloudsql, ip_address, project_id, sql_name):
                                      sort_keys=True,
                                      indent=4,
                                      separators=(',', ': ')))
-            # Replace the fourth marker with the API call required to patch
-            # a Cloud SQL instance
-            p_response = TODO04
+            p_response = cloudsql.instances().patch(project=project_id,
+                                                    instance=sql_name,
+                                                    body=response).execute()
             time.sleep(random.randint(1, 6))
             verify = cloudsql.instances().get(project=project_id,
                                               instance=sql_name,
@@ -104,21 +104,15 @@ def server_authorization(cloudsql, ip_address, project_id, sql_name):
 
 def main():
     logging.basicConfig(level=logging.DEBUG)
-    # Replace the first marker with the metadata endpoint substring
-    # required to query the value of the external IP address
-    ip_endpoint = 'TODO01'
+    ip_endpoint = '/instance/network-interfaces/0/access-configs/0/external-ip'
     ip_address = metaquery(METADATA_SERVER +
                            ip_endpoint)
     token_data = metaquery(METADATA_SERVER +
                            '/instance/service-accounts/default/token')
-    # Replace the second marker with the metadata endpoint substring
-    # required to query the project ID
     project_id = metaquery(METADATA_SERVER +
-                           'TODO02')
-    # Replace the second marker with the metadata endpoint substring
-    # required to query the value for the custom key 'sql-name'
+                           '/project/project-id')
     sql_name = metaquery(METADATA_SERVER +
-                         'TODO03')
+                         '/instance/attributes/sql-name')
     if token_data and sql_name and ip_address:
         http = httplib2.Http()
         j = json.loads(token_data)
